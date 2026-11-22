@@ -6,16 +6,35 @@ from html.parser import HTMLParser
 from pathlib import Path
 import re
 import sys
-from urllib.request import urlopen
+import time
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 
 API = "https://projects.blender.org/api/v1/repos/blender/blender/milestones"
 RELEASES = "https://download.blender.org/release/"
+USER_AGENT = "hermes-devbox-ci/1.0 (+https://github.com/LumenoProject/hermes-devbox)"
+RETRYABLE_STATUS = frozenset({403, 429, 500, 502, 503, 504})
 
 
-def fetch(url):
-    with urlopen(url, timeout=30) as response:
-        return response.read().decode("utf-8")
+def fetch(url, attempts=5):
+    # projects.blender.org intermittently answers GitHub Actions runners with
+    # 403; retry transient failures with exponential backoff.
+    for attempt in range(attempts):
+        request = Request(url, headers={"User-Agent": USER_AGENT})
+        try:
+            with urlopen(request, timeout=30) as response:
+                return response.read().decode("utf-8")
+        except HTTPError as exc:
+            if exc.code not in RETRYABLE_STATUS or attempt == attempts - 1:
+                raise
+            print(f"Retrying {url} after HTTP {exc.code}", file=sys.stderr)
+        except (URLError, TimeoutError) as exc:
+            if attempt == attempts - 1:
+                raise
+            print(f"Retrying {url} after {exc}", file=sys.stderr)
+        time.sleep(5 * 2**attempt)
+    raise AssertionError("unreachable")
 
 
 class Links(HTMLParser):

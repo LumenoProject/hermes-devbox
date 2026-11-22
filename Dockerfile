@@ -1,6 +1,8 @@
 # Hermes Devbox — customized Hermes Agent environment.
 #
-# Derived from the official image (nousresearch/hermes-agent, stable channel).
+# Derived from the official image (nousresearch/hermes-agent, stable-desktop
+# channel: the stable release gate's Bot Screen desktop variant, built with
+# HERMES_BOT_DESKTOP=1 — Xvnc, XFCE components and apt Chromium included).
 # Rules inherited from upstream docs (website/docs/user-guide/docker.md):
 #   - NEVER override ENTRYPOINT/CMD: the s6-overlay supervision tree must own
 #     PID 1; the dispatcher drops privileges to the `hermes` user (UID 10000).
@@ -8,7 +10,7 @@
 #     /opt/data (HERMES_HOME), mounted from a volume at runtime.
 #   - Do not clobber upstream-managed symlinks in /usr/local/bin
 #     (python3, node, npm, npx, pnpm, ffmpeg, rg are PM-managed).
-ARG HERMES_IMAGE=nousresearch/hermes-agent:stable
+ARG HERMES_IMAGE=nousresearch/hermes-agent:stable-desktop
 FROM ${HERMES_IMAGE}
 
 SHELL ["/bin/bash", "-c"]

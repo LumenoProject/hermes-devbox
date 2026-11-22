@@ -6,7 +6,8 @@
 > 本项目包含 AI 生成的内容，使用前请自行核查。
 
 定制化的 [Hermes Agent](https://github.com/NousResearch/hermes-agent) 环境：基于官方镜像
-`nousresearch/hermes-agent:stable`（Debian 13）构建派生镜像，额外提供 Go、Rust、
+`nousresearch/hermes-agent:stable-desktop`（Debian 13，stable 通道的桌面变体，
+含 Bot Screen 所需的 Xvnc / XFCE 组件，支持 agent 在容器内操作图形桌面）构建派生镜像，额外提供 Go、Rust、
 Blender LTS、GitHub CLI、uv 以及常用系统 / 网络诊断工具，同时完整保留官方的
 s6 监管树、`hermes` 运行时用户（UID 10000）与 `/opt/data` 数据目录约定。
 
@@ -70,7 +71,7 @@ HERMES_IMAGE=hermes-devbox:local docker compose up -d --pull never
 基础镜像可用构建参数固定（含 digest 精确锁定）：
 
 ```bash
-docker build --build-arg HERMES_IMAGE=nousresearch/hermes-agent:stable -t hermes-devbox:local .
+docker build --build-arg HERMES_IMAGE=nousresearch/hermes-agent:stable-desktop -t hermes-devbox:local .
 ```
 
 ## 附加工具

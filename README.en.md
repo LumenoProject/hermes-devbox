@@ -6,8 +6,10 @@
 > This project contains AI-generated content. Review it before use.
 
 A customized [Hermes Agent](https://github.com/NousResearch/hermes-agent)
-environment: a derived image built on the official `nousresearch/hermes-agent:stable`
-(Debian 13) that adds Go, Rust, Blender LTS, GitHub CLI, uv, and common
+environment: a derived image built on the official `nousresearch/hermes-agent:stable-desktop`
+(Debian 13; the stable channel's desktop variant, shipping the Xvnc / XFCE
+components for Bot Screen so the agent can drive a graphical desktop inside the
+container) that adds Go, Rust, Blender LTS, GitHub CLI, uv, and common
 system/networking tools, while fully preserving the upstream s6 supervision tree,
 the `hermes` runtime user (UID 10000), and the `/opt/data` data-directory contract.
 
@@ -76,7 +78,7 @@ HERMES_IMAGE=hermes-devbox:local docker compose up -d --pull never
 The base image can be pinned via a build arg (a digest pin is exact):
 
 ```bash
-docker build --build-arg HERMES_IMAGE=nousresearch/hermes-agent:stable -t hermes-devbox:local .
+docker build --build-arg HERMES_IMAGE=nousresearch/hermes-agent:stable-desktop -t hermes-devbox:local .
 ```
 
 ## Added tools

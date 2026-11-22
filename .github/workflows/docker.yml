@@ -54,7 +54,7 @@ jobs:
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
           labels: |
             org.opencontainers.image.title=Hermes Devbox
-            org.opencontainers.image.description=Customized Hermes Agent environment derived from nousresearch/hermes-agent:stable with Go, Rust, Blender LTS, GitHub CLI, uv and networking tools
+            org.opencontainers.image.description=Customized Hermes Agent environment derived from nousresearch/hermes-agent:stable-desktop with Go, Rust, Blender LTS, GitHub CLI, uv and networking tools
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
 
       - name: Blender
