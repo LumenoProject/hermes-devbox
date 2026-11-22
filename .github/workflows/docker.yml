@@ -1,0 +1,216 @@
+name: Build
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+  schedule:
+    # Every Monday at 01:10 UTC; refresh the stable Hermes base and floating
+    # stable/LTS toolchains (Go, Rust, Node LTS, Blender LTS, uv, gh).
+    - cron: '10 1 * * 1'
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  container:
+    name: Build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+
+    steps:
+      # Follow compatible updates within each major release.
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Image
+        id: image
+        shell: bash
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Tags
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ steps.image.outputs.name }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=tag
+            type=ref,event=pr
+            type=sha
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+          labels: |
+            org.opencontainers.image.title=Hermes Devbox
+            org.opencontainers.image.description=Customized Hermes Agent environment derived from nousresearch/hermes-agent:stable with Go, Rust, Blender LTS, GitHub CLI, uv and networking tools
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+
+      - name: Blender
+        id: blender
+        shell: bash
+        run: python3 .github/scripts/resolve-blender-lts.py
+
+      - name: Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Login
+        if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64
+          build-args: |
+            BLENDER_VERSION=${{ steps.blender.outputs.version }}
+          pull: true
+          load: true
+          push: false
+          no-cache: ${{ github.event_name == 'schedule' }}
+          cache-from: type=registry,ref=${{ steps.image.outputs.name }}:buildcache-amd64
+          # Only trusted main-branch builds update the shared cache.
+          cache-to: ${{ github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && format('type=registry,ref={0}:buildcache-amd64,mode=max', steps.image.outputs.name) || '' }}
+          tags: hermes-devbox:ci
+          labels: ${{ steps.meta.outputs.labels }}
+
+      - name: Check
+        shell: bash
+        env:
+          EXPECTED_BLENDER_VERSION: ${{ steps.blender.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          # The derived image must keep the upstream entrypoint chain intact.
+          test "$(docker image inspect hermes-devbox:ci --format '{{json .Config.Entrypoint}}')" \
+            = '["/opt/hermes/docker/entrypoint-dispatch.sh"]'
+
+          docker run --rm --env EXPECTED_BLENDER_VERSION --entrypoint /bin/bash hermes-devbox:ci -euo pipefail -c '
+            uv --version
+            python --version
+            python3 --version
+            blender --version
+            test "$(blender --version | sed -n "1s/^Blender //p" | cut -d " " -f 1)" = "$EXPECTED_BLENDER_VERSION"
+            go version
+            rustc --version
+            cargo --version
+            node --version
+            npm --version
+            gh --version
+            jq --version
+            tmux -V
+            btop --version
+            nvtop --version
+            test -s /etc/apt/sources.list.d/debian.sources
+            if grep -q "http://" /etc/apt/sources.list.d/debian.sources; then exit 1; fi
+            test -s /etc/apt/sources.list.d/github-cli.list
+
+            tmux -L ci new-session -d -s smoke
+            test "$(tmux -L ci show-options -gv mouse)" = on
+            tmux -L ci kill-server
+            test -z "$(getcap /usr/bin/nvtop)"
+            test "$(locale charmap 2>&1)" = UTF-8
+            command -v ping traceroute tracert telnet dig nc ip ss gcc g++ make rg ffmpeg git curl jq uvx
+
+            # Hermes runtime contract: install tree, data dir, exec shim, runtime user.
+            test -x /opt/hermes/docker/entrypoint-dispatch.sh
+            test -x /opt/hermes/bin/hermes
+            test -d /opt/hermes/.venv
+            test "$HERMES_HOME" = /opt/data
+            test "$(id -u hermes)" = 10000
+            jq -e .version /etc/hermes/image-provenance.json > /dev/null
+
+            # The runtime user can use the devbox toolchain; shared toolchains
+            # stay read-only for it. chown mirrors what the s6 stage2 hook does
+            # for /opt/data at real boot.
+            chown 10000:10000 /opt/data
+            su - hermes -c "uv --version && python3 --version && blender --version && go version && rustc --version && cargo --version && node --version && npm --version && gh --version && tmux -V"
+            su - hermes -c "test ! -w /opt/rustup && test ! -w /opt/hermes"
+          '
+
+          # Full supervised boot through the real entrypoint: s6 stage2 seeds
+          # the data dir, then the arg router runs `hermes --version`.
+          timeout 600 docker run --rm hermes-devbox:ci --version
+
+          # Root-owned writable layer stays usable via docker exec.
+          container_id="$(docker run -d hermes-devbox:ci sleep 60)"
+          trap 'docker rm -f "$container_id" >/dev/null' EXIT
+          test "$(docker exec --user root "$container_id" id -u)" = 0
+          docker exec "$container_id" hermes --version
+
+      - name: Versions
+        shell: bash
+        env:
+          IMAGE_TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          set -euo pipefail
+          report="$(mktemp)"
+          trap 'rm -f "$report"' EXIT
+          {
+            printf '### Software versions\n\n'
+            printf 'Commit: `%s`\n\n' "$GITHUB_SHA"
+            printf 'Image ID: `%s`\n\n' "$(docker image inspect hermes-devbox:ci --format '{{.Id}}')"
+            printf 'Image tags:\n\n'
+            while IFS= read -r tag; do
+              [[ -n "$tag" ]] || continue
+              printf -- '- `%s`\n' "$tag"
+            done <<< "$IMAGE_TAGS"
+            printf '\n'
+          } > "$report"
+          docker run --rm --entrypoint /bin/bash hermes-devbox:ci -euo pipefail -c '
+            row() {
+              local name="$1" version
+              shift
+              version="$("$@" | sed -n "1p")"
+              test -n "$version"
+              version="${version//|/\\|}"
+              printf "| %s | %s |\n" "$name" "$version"
+            }
+            printf "| Software | Version |\n| --- | --- |\n"
+            printf "| Hermes Agent (base image) | %s |\n" "$(jq -r .version /etc/hermes/image-provenance.json)"
+            row Node.js node --version
+            row npm npm --version
+            row npx npx --version
+            row Blender blender --version
+            row Go go version
+            row Rust rustc --version
+            row Cargo cargo --version
+            row rustup rustup --version
+            row rustfmt rustfmt --version
+            row Clippy clippy-driver --version
+            row Python python3 --version
+            row uv uv --version
+            row gh gh --version
+          ' >> "$report"
+          cat "$report" >> "$GITHUB_STEP_SUMMARY"
+
+      # Re-tag/push the exact locally tested image; do not rebuild after tests.
+      - name: Publish
+        if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+        shell: bash
+        env:
+          IMAGE_TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          set -euo pipefail
+          while IFS= read -r tag; do
+            [[ -n "$tag" ]] || continue
+            docker tag hermes-devbox:ci "$tag"
+            docker push "$tag"
+          done <<< "$IMAGE_TAGS"

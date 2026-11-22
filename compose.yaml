@@ -1,0 +1,44 @@
+# Hermes Devbox — persistent gateway deployment.
+#
+# Do NOT add `init: true` or override `entrypoint:` here: the image's
+# entrypoint-dispatch must own PID 1 so the s6-overlay supervision tree
+# (gateway/dashboard auto-restart, zombie reaping, privilege drop to the
+# `hermes` user) stays intact. See upstream docs: user-guide/docker.
+services:
+  hermes:
+    image: ${HERMES_IMAGE:-ghcr.io/lumenoproject/hermes-devbox:latest}
+    build:
+      context: .
+    platform: linux/amd64
+    container_name: hermes
+    restart: unless-stopped
+    command: ["gateway", "run"]
+    # Chromium (browser tools) needs shared memory beyond the 64 MB default.
+    shm_size: 1gb
+    volumes:
+      # Named volume keeps SQLite WAL coherent; prefer it over cross-VM bind
+      # mounts (drvfs/virtiofs/9p silently corrupt WAL databases).
+      - data:/opt/data
+    environment:
+      - HERMES_UID=${HERMES_UID:-10000}
+      - HERMES_GID=${HERMES_GID:-10000}
+      # Web dashboard (port 9119). A non-loopback bind requires an auth
+      # provider — e.g. HERMES_DASHBOARD_BASIC_AUTH_USERNAME/_PASSWORD.
+      # - HERMES_DASHBOARD=1
+      # - HERMES_DASHBOARD_BASIC_AUTH_USERNAME=${HERMES_DASHBOARD_BASIC_AUTH_USERNAME}
+      # - HERMES_DASHBOARD_BASIC_AUTH_PASSWORD=${HERMES_DASHBOARD_BASIC_AUTH_PASSWORD}
+      # - HERMES_DASHBOARD_BASIC_AUTH_SECRET=${HERMES_DASHBOARD_BASIC_AUTH_SECRET}
+      # OpenAI-compatible API server (port 8642). Off by default; enabling it
+      # beyond localhost requires API_SERVER_KEY (openssl rand -hex 32).
+      # - API_SERVER_ENABLED=true
+      # - API_SERVER_HOST=0.0.0.0
+      # - API_SERVER_KEY=${API_SERVER_KEY}
+    ports:
+      # Uncomment together with the matching environment variables above.
+      # - "${HERMES_BIND_IP:-127.0.0.1}:8642:8642"   # gateway API server
+      # - "${HERMES_BIND_IP:-127.0.0.1}:9119:9119"   # web dashboard
+    # NVIDIA GPU: uncomment after configuring NVIDIA Container Toolkit on the host.
+    # gpus: all
+
+volumes:
+  data:
