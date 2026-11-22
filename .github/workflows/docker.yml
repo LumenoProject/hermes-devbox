@@ -60,7 +60,18 @@ jobs:
       - name: Blender
         id: blender
         shell: bash
-        run: python3 .github/scripts/resolve-blender-lts.py
+        run: |
+          set -euo pipefail
+          # On success the script writes version=<resolved> to $GITHUB_OUTPUT.
+          # projects.blender.org intermittently blocks Actions runner IPs (HTTP
+          # 403); fall back to the Dockerfile's pinned default so the build can
+          # proceed, and let the weekly schedule re-resolve once the API recovers.
+          if ! python3 .github/scripts/resolve-blender-lts.py; then
+            fallback="$(sed -n 's/^ARG BLENDER_VERSION=//p' Dockerfile | head -n1)"
+            test -n "$fallback"
+            echo "::warning::Blender LTS resolution failed; falling back to Dockerfile default ${fallback}"
+            echo "version=${fallback}" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Buildx
         uses: docker/setup-buildx-action@v4
@@ -122,9 +133,6 @@ jobs:
             if grep -q "http://" /etc/apt/sources.list.d/debian.sources; then exit 1; fi
             test -s /etc/apt/sources.list.d/github-cli.list
 
-            tmux -L ci new-session -d -s smoke
-            test "$(tmux -L ci show-options -gv mouse)" = on
-            tmux -L ci kill-server
             test -z "$(getcap /usr/bin/nvtop)"
             test "$(locale charmap 2>&1)" = UTF-8
             command -v ping traceroute tracert telnet dig nc ip ss gcc g++ make rg ffmpeg git curl jq uvx

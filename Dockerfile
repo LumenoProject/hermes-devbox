@@ -51,7 +51,6 @@ RUN set -euxo pipefail; \
     if [[ -n "$(getcap /usr/bin/nvtop)" ]]; then \
         setcap -r /usr/bin/nvtop; \
     fi; \
-    printf '%s\n' 'set -g mouse on' > /etc/tmux.conf; \
     printf '%s\n' 'set tabsize 4' >> /etc/nanorc; \
     printf '%s\n' 'en_US.UTF-8 UTF-8' > /etc/locale.gen; \
     locale-gen; \
